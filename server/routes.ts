@@ -306,6 +306,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/conversations/:id", async (req: Request, res: Response) => {
+    try {
+      const emailId = parseInt(req.params.id);
+      if (isNaN(emailId)) {
+        res.status(400).json({ error: "잘못된 이메일 ID입니다." });
+        return;
+      }
+      const email = await storage.getEmailById(emailId);
+      if (!email) {
+        res.status(404).json({ error: "이메일을 찾을 수 없습니다." });
+        return;
+      }
+      res.json(email);
+    } catch (error) {
+      console.error("Get email error:", error);
+      res.status(500).json({ error: "이메일을 가져오는 중 오류가 발생했습니다." });
+    }
+  });
+
   app.get("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
       const conversationId = parseInt(req.params.id);

@@ -10,7 +10,8 @@ import {
   FileText,
   Mail,
   User,
-  X
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 import {
   Dialog,
@@ -18,7 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import type { CalendarEvent, Conversation } from "@shared/schema";
 
 function EventCard({ event, onClick }: { event: CalendarEvent; onClick: () => void }) {
@@ -63,22 +63,14 @@ function EventCard({ event, onClick }: { event: CalendarEvent; onClick: () => vo
 
 export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
-  const [selectedEmail, setSelectedEmail] = useState<Conversation | null>(null);
   
   const { data: events, isLoading } = useQuery<CalendarEvent[]>({
     queryKey: ["/api/events"],
   });
 
-  const { data: email } = useQuery<Conversation>({
+  const { data: email, isLoading: isEmailLoading } = useQuery<Conversation>({
     queryKey: ["/api/conversations", selectedEvent?.emailId],
     enabled: !!selectedEvent?.emailId,
-  });
-
-  // 이메일 데이터가 로드되면 상태 업데이트
-  useState(() => {
-    if (email) {
-      setSelectedEmail(email);
-    }
   });
 
   return (
@@ -143,81 +135,92 @@ export default function CalendarPage() {
         )}
 
         <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <div className="flex items-start justify-between gap-4">
-                <DialogTitle className="flex-1">{selectedEvent?.title}</DialogTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setSelectedEvent(null)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
+          <DialogContent className="max-w-4xl max-h-[95vh] flex flex-col">
+            <DialogHeader className="flex-shrink-0">
+              <DialogTitle>{selectedEvent?.title}</DialogTitle>
             </DialogHeader>
             
-            {selectedEvent && (
-              <div className="space-y-4">
-                <div className="grid gap-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">일정:</span>
-                    <span>{selectedEvent.startDate}</span>
-                    {selectedEvent.endDate && <span>~ {selectedEvent.endDate}</span>}
-                  </div>
-                  
-                  {selectedEvent.location && (
+            <div className="flex-1 overflow-y-auto pr-2">
+              {selectedEvent && (
+                <div className="space-y-4">
+                  <div className="grid gap-2 text-sm">
                     <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">장소:</span>
-                      <span>{selectedEvent.location}</span>
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">일정:</span>
+                      <span>{selectedEvent.startDate}</span>
+                      {selectedEvent.endDate && <span>~ {selectedEvent.endDate}</span>}
+                    </div>
+                    
+                    {selectedEvent.location && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">장소:</span>
+                        <span>{selectedEvent.location}</span>
+                      </div>
+                    )}
+                    
+                    {selectedEvent.description && (
+                      <div className="flex items-start gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1">
+                          <span className="font-medium">상세 내용:</span>
+                          <p className="mt-1 text-muted-foreground">{selectedEvent.description}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {isEmailLoading && (
+                    <div className="border-t pt-4">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="text-sm text-muted-foreground">원본 이메일 로딩 중...</span>
+                      </div>
                     </div>
                   )}
-                  
-                  {selectedEvent.description && (
-                    <div className="flex items-start gap-2">
-                      <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <div className="flex-1">
-                        <span className="font-medium">상세 내용:</span>
-                        <p className="mt-1 text-muted-foreground">{selectedEvent.description}</p>
+
+                  {!isEmailLoading && email && (
+                    <div className="border-t pt-4">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
+                        <Mail className="h-4 w-4" />
+                        원본 이메일
+                      </h3>
+                      <div className="space-y-3">
+                        <div>
+                          <span className="text-sm font-medium">제목:</span>
+                          <p className="text-sm text-muted-foreground mt-1">{email.subject}</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <User className="h-3 w-3 text-muted-foreground" />
+                          <span className="font-medium">발신자:</span>
+                          <span className="text-muted-foreground">{email.sender}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                          <span className="font-medium">날짜:</span>
+                          <span className="text-muted-foreground">{email.date}</span>
+                        </div>
+                        <div>
+                          <span className="text-sm font-medium">내용:</span>
+                          <div className="mt-2 p-4 bg-muted rounded-md">
+                            <p className="text-sm whitespace-pre-wrap">{email.body}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!isEmailLoading && !email && selectedEvent?.emailId && (
+                    <div className="border-t pt-4">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>원본 이메일을 찾을 수 없습니다.</span>
                       </div>
                     </div>
                   )}
                 </div>
-
-                {email && (
-                  <div className="border-t pt-4">
-                    <h3 className="font-semibold mb-3 flex items-center gap-2">
-                      <Mail className="h-4 w-4" />
-                      원본 이메일
-                    </h3>
-                    <div className="space-y-3">
-                      <div>
-                        <span className="text-sm font-medium">제목:</span>
-                        <p className="text-sm text-muted-foreground mt-1">{email.subject}</p>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <User className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-medium">발신자:</span>
-                        <span className="text-muted-foreground">{email.sender}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Clock className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-medium">날짜:</span>
-                        <span className="text-muted-foreground">{email.receivedDate}</span>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium">내용:</span>
-                        <div className="mt-2 p-4 bg-muted rounded-md max-h-64 overflow-y-auto">
-                          <p className="text-sm whitespace-pre-wrap">{email.body}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </DialogContent>
         </Dialog>
       </main>

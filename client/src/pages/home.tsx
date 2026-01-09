@@ -8,6 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { 
   Search, 
   Upload, 
@@ -76,7 +82,8 @@ function EmailResultCard({
   expanded,
   onToggle,
   onExtract,
-  isExtracting
+  isExtracting,
+  onViewFull
 }: { 
   result: SearchResult; 
   index: number;
@@ -84,6 +91,7 @@ function EmailResultCard({
   onToggle: () => void;
   onExtract: (emailId: number) => void;
   isExtracting: boolean;
+  onViewFull: () => void;
 }) {
   return (
     <Card 
@@ -122,7 +130,7 @@ function EmailResultCard({
               </p>
             )}
             {expanded && result.body && (
-              <div className="mt-4 p-4 bg-muted rounded-md">
+              <div className="mt-4 p-4 bg-muted rounded-md max-h-64 overflow-y-auto">
                 <p className="text-sm whitespace-pre-wrap">{result.body}</p>
               </div>
             )}
@@ -144,6 +152,17 @@ function EmailResultCard({
                     <Sparkles className="h-4 w-4 mr-1" />
                   )}
                   일정 추출
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewFull();
+                  }}
+                >
+                  <FileText className="h-4 w-4 mr-1" />
+                  전체 보기
                 </Button>
               </div>
             )}
@@ -280,6 +299,7 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [searchResults, setSearchResults] = useState<ChatResponse | null>(null);
   const [extractingEmails, setExtractingEmails] = useState<Set<number>>(new Set());
+  const [selectedEmail, setSelectedEmail] = useState<SearchResult | null>(null);
 
   const { data: stats, isLoading: statsLoading } = useQuery<Stats>({
     queryKey: ["/api/stats"],
@@ -599,6 +619,7 @@ export default function Home() {
                     onToggle={() => toggleEmailExpand(index)}
                     onExtract={(emailId) => extractMutation.mutate(emailId)}
                     isExtracting={extractingEmails.has(parseInt(result.mailId))}
+                    onViewFull={() => setSelectedEmail(result)}
                   />
                 ))}
               </div>
@@ -618,6 +639,47 @@ export default function Home() {
           )}
         </section>
       </main>
+
+      <Dialog open={!!selectedEmail} onOpenChange={(open) => !open && setSelectedEmail(null)}>
+        <DialogContent className="max-w-4xl max-h-[95vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>{selectedEmail?.subject || "(제목 없음)"}</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2">
+            {selectedEmail && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                  {selectedEmail.sender && (
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      <span className="font-medium">발신자:</span>
+                      <span>{selectedEmail.sender}</span>
+                    </div>
+                  )}
+                  {selectedEmail.date && (
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      <span className="font-medium">날짜:</span>
+                      <span>{selectedEmail.date}</span>
+                    </div>
+                  )}
+                  <Badge variant="secondary">
+                    점수: {selectedEmail.score.toFixed(1)}
+                  </Badge>
+                </div>
+                
+                <div>
+                  <span className="text-sm font-medium">내용:</span>
+                  <div className="mt-2 p-4 bg-muted rounded-md">
+                    <p className="text-sm whitespace-pre-wrap">{selectedEmail.body}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <footer className="border-t mt-12">
         <div className="max-w-7xl mx-auto px-4 py-6">
