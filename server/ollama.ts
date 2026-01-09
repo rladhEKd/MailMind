@@ -48,35 +48,46 @@ export async function extractEventsFromEmail(
   emailBody: string,
   emailDate: string
 ): Promise<ExtractedEvent[]> {
-  const systemPrompt = `당신은 이메일에서 일정/이벤트 정보를 추출하는 AI 비서입니다.
-이메일 내용을 분석하여 일정 정보를 JSON 형식으로 추출해주세요.
+  const systemPrompt = `당신은 이메일에서 일정/이벤트 정보를 추출하는 전문가입니다.
+이메일 내용을 분석하여 모든 일정 정보를 정확하게 추출해주세요.
+
+중요 규칙:
+1. 제목(title)은 반드시 구체적으로 작성 (이메일 제목이나 본문에서 찾기)
+2. 날짜(startDate)가 없으면 해당 일정은 제외
+3. 날짜 형식은 반드시 "YYYY-MM-DD HH:mm" 또는 "YYYY-MM-DD"
+4. 여러 개의 일정이 있으면 모두 추출
+5. 빈 문자열 사용 금지 - 정보가 없으면 null 사용
 
 반드시 다음 JSON 배열 형식으로만 응답하세요:
 [
   {
-    "title": "일정 제목",
-    "startDate": "YYYY-MM-DD HH:mm",
-    "endDate": "YYYY-MM-DD HH:mm",
-    "location": "장소",
-    "description": "설명"
+    "title": "구체적인 일정 제목 (필수)",
+    "startDate": "YYYY-MM-DD HH:mm (필수)",
+    "endDate": "YYYY-MM-DD HH:mm (선택)",
+    "location": "장소 (선택, 없으면 null)",
+    "description": "추가 설명 (선택, 없으면 null)"
   }
 ]
 
-일정이 없으면 빈 배열 []을 반환하세요.
-날짜가 명시되지 않은 경우 이메일 날짜(${emailDate})를 기준으로 추정하세요.`;
+일정이 없거나 날짜 정보가 없으면 빈 배열 []을 반환하세요.`;
 
-  const userPrompt = `다음 이메일에서 일정 정보를 추출해주세요:
+  const userPrompt = `다음 이메일에서 모든 일정 정보를 추출해주세요:
 
-제목: ${emailSubject}
+이메일 제목: ${emailSubject}
 
-내용:
-${emailBody}`;
+이메일 본문:
+${emailBody}
+
+참고 - 이메일 수신 날짜: ${emailDate}`;
 
   try {
-    const response = await chatWithOllama([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]);
+    const response = await chatWithOllama(
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      "llama3.2"
+    );
 
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
@@ -84,7 +95,18 @@ ${emailBody}`;
     }
 
     const events = JSON.parse(jsonMatch[0]);
-    return Array.isArray(events) ? events : [];
+    
+    // 유효성 검사: title과 startDate가 비어있거나 없는 이벤트 필터링
+    const validEvents = Array.isArray(events) 
+      ? events.filter(e => 
+          e.title && 
+          e.title.trim() !== '' && 
+          e.startDate && 
+          e.startDate.trim() !== ''
+        )
+      : [];
+    
+    return validEvents;
   } catch (error) {
     console.error("Event extraction error:", error);
     return [];

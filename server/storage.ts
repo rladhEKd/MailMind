@@ -307,4 +307,14 @@ function createStorage(): IStorage {
   return new DatabaseStorage();
 }
 
-export const storage = createStorage();
+let storageInstance: IStorage = createStorage();
+
+export function setStorage(newStorage: IStorage) {
+  storageInstance = newStorage;
+}
+
+export const storage = new Proxy({} as IStorage, {
+  get(target, prop) {
+    return (storageInstance as any)[prop];
+  }
+});

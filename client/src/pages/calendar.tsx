@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,13 +7,23 @@ import {
   Calendar as CalendarIcon, 
   MapPin, 
   Clock,
-  FileText
+  FileText,
+  Mail,
+  User,
+  X
 } from "lucide-react";
-import type { CalendarEvent } from "@shared/schema";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import type { CalendarEvent, Conversation } from "@shared/schema";
 
-function EventCard({ event }: { event: CalendarEvent }) {
+function EventCard({ event, onClick }: { event: CalendarEvent; onClick: () => void }) {
   return (
-    <Card className="hover-elevate">
+    <Card className="hover-elevate cursor-pointer" onClick={onClick}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
@@ -51,8 +62,23 @@ function EventCard({ event }: { event: CalendarEvent }) {
 }
 
 export default function CalendarPage() {
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [selectedEmail, setSelectedEmail] = useState<Conversation | null>(null);
+  
   const { data: events, isLoading } = useQuery<CalendarEvent[]>({
     queryKey: ["/api/events"],
+  });
+
+  const { data: email } = useQuery<Conversation>({
+    queryKey: ["/api/conversations", selectedEvent?.emailId],
+    enabled: !!selectedEvent?.emailId,
+  });
+
+  // 이메일 데이터가 로드되면 상태 업데이트
+  useState(() => {
+    if (email) {
+      setSelectedEmail(email);
+    }
   });
 
   return (
@@ -107,10 +133,93 @@ export default function CalendarPage() {
         ) : (
           <div className="space-y-4" data-testid="events-list">
             {events?.map(event => (
-              <EventCard key={event.id} event={event} />
+              <EventCard 
+                key={event.id} 
+                event={event} 
+                onClick={() => setSelectedEvent(event)}
+              />
             ))}
           </div>
         )}
+
+        <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <div className="flex items-start justify-between gap-4">
+                <DialogTitle className="flex-1">{selectedEvent?.title}</DialogTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSelectedEvent(null)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </DialogHeader>
+            
+            {selectedEvent && (
+              <div className="space-y-4">
+                <div className="grid gap-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium">일정:</span>
+                    <span>{selectedEvent.startDate}</span>
+                    {selectedEvent.endDate && <span>~ {selectedEvent.endDate}</span>}
+                  </div>
+                  
+                  {selectedEvent.location && (
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">장소:</span>
+                      <span>{selectedEvent.location}</span>
+                    </div>
+                  )}
+                  
+                  {selectedEvent.description && (
+                    <div className="flex items-start gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <span className="font-medium">상세 내용:</span>
+                        <p className="mt-1 text-muted-foreground">{selectedEvent.description}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {email && (
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3 flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      원본 이메일
+                    </h3>
+                    <div className="space-y-3">
+                      <div>
+                        <span className="text-sm font-medium">제목:</span>
+                        <p className="text-sm text-muted-foreground mt-1">{email.subject}</p>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <User className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-medium">발신자:</span>
+                        <span className="text-muted-foreground">{email.sender}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Clock className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-medium">날짜:</span>
+                        <span className="text-muted-foreground">{email.receivedDate}</span>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium">내용:</span>
+                        <div className="mt-2 p-4 bg-muted rounded-md max-h-64 overflow-y-auto">
+                          <p className="text-sm whitespace-pre-wrap">{email.body}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
