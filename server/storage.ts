@@ -39,6 +39,15 @@ export interface IStorage {
   getAllEmails(limit?: number): Promise<Email[]>;
   getUnprocessedEmails(): Promise<Email[]>;
   updateEmailClassification(id: number, classification: string, confidence: string): Promise<void>;
+  updateEmailMetadata(
+    id: number,
+    updates: {
+      classification?: string | null;
+      classificationConfidence?: string | null;
+      importance?: string | null;
+      label?: string | null;
+    }
+  ): Promise<void>;
   markEmailProcessed(id: number): Promise<void>;
   
   searchEmails(query: string, topK: number): Promise<SearchResult[]>;
@@ -278,6 +287,37 @@ export class DatabaseStorage implements IStorage {
   async updateEmailClassification(id: number, classification: string, confidence: string): Promise<void> {
     await db.update(emails)
       .set({ classification, classificationConfidence: confidence })
+      .where(eq(emails.id, id));
+  }
+
+  async updateEmailMetadata(
+    id: number,
+    updates: {
+      classification?: string | null;
+      classificationConfidence?: string | null;
+      importance?: string | null;
+      label?: string | null;
+    }
+  ): Promise<void> {
+    const next: Record<string, string | null> = {};
+
+    if ("classification" in updates) {
+      next.classification = updates.classification ?? null;
+    }
+    if ("classificationConfidence" in updates) {
+      next.classificationConfidence = updates.classificationConfidence ?? null;
+    }
+    if ("importance" in updates) {
+      next.importance = updates.importance ?? null;
+    }
+    if ("label" in updates) {
+      next.label = updates.label ?? null;
+    }
+
+    if (Object.keys(next).length === 0) return;
+
+    await db.update(emails)
+      .set(next)
       .where(eq(emails.id, id));
   }
 

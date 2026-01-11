@@ -389,6 +389,42 @@ export class LocalSQLiteStorage implements IStorage {
     this.db.prepare('UPDATE emails SET classification = ?, classification_confidence = ? WHERE id = ?').run(classification, confidence, id);
   }
 
+  async updateEmailMetadata(
+    id: number,
+    updates: {
+      classification?: string | null;
+      classificationConfidence?: string | null;
+      importance?: string | null;
+      label?: string | null;
+    }
+  ): Promise<void> {
+    const fields: string[] = [];
+    const values: Array<string | null> = [];
+
+    if ("classification" in updates) {
+      fields.push("classification = ?");
+      values.push(updates.classification ?? null);
+    }
+    if ("classificationConfidence" in updates) {
+      fields.push("classification_confidence = ?");
+      values.push(updates.classificationConfidence ?? null);
+    }
+    if ("importance" in updates) {
+      fields.push("importance = ?");
+      values.push(updates.importance ?? null);
+    }
+    if ("label" in updates) {
+      fields.push("label = ?");
+      values.push(updates.label ?? null);
+    }
+
+    if (fields.length === 0) return;
+
+    this.db
+      .prepare(`UPDATE emails SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values, id);
+  }
+
   async markEmailProcessed(id: number): Promise<void> {
     this.db.prepare("UPDATE emails SET is_processed = 'true' WHERE id = ?").run(id);
   }

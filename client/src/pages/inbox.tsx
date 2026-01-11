@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,8 @@ import {
   Paperclip,
   CheckCircle,
   Bell,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -72,12 +74,9 @@ export default function InboxPage() {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [extractingId, setExtractingId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("email");
-  const [draftByEmailId, setDraftByEmailId] = useState<Record<number, string>>(
-    {}
-  );
-  const [draftErrorByEmailId, setDraftErrorByEmailId] = useState<
-    Record<number, string>
-  >({});
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [draftByEmailId, setDraftByEmailId] = useState<Record<number, string>>({});
+  const [draftErrorByEmailId, setDraftErrorByEmailId] = useState<Record<number, string>>({});
   const [draftLoadingId, setDraftLoadingId] = useState<number | null>(null);
 
   const { data: allEmails } = useQuery<Email[]>({
@@ -110,6 +109,37 @@ export default function InboxPage() {
       toast({
         title: "분류 완료",
         description: "이메일이 성공적으로 분류되었습니다.",
+      });
+    },
+  });
+
+  const updateEmailMutation = useMutation({
+    mutationFn: async (payload: {
+      emailId: number;
+      updates: { classification?: string | null; importance?: string | null; label?: string | null };
+    }) => {
+      const response = await apiRequest(
+        "POST",
+        `/api/emails/${payload.emailId}/update`,
+        payload.updates
+      );
+      return response.json() as Promise<Email | undefined>;
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/emails"] });
+      if (updated && selectedEmail?.id === updated.id) {
+        setSelectedEmail((prev) => (prev ? { ...prev, ...updated } : prev));
+      }
+      toast({
+        title: "수정 완료",
+        description: "메일 정보가 업데이트되었습니다.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "수정 실패",
+        description: "메일 정보 업데이트 중 오류가 발생했습니다.",
+        variant: "destructive",
       });
     },
   });
@@ -155,9 +185,29 @@ export default function InboxPage() {
   });
 
   const filteredEmails = emails || [];
+  const parseLabelTags = (label?: string) =>
+    (label || "")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+  const hasLabelTag = (email: Email, tag: string) =>
+    parseLabelTags(email.label).includes(tag);
+
+  const setLabelTag = (label: string | undefined, tag: string, enabled: boolean) => {
+    const tags = new Set(parseLabelTags(label));
+    if (enabled) {
+      tags.add(tag);
+    } else {
+      tags.delete(tag);
+    }
+    return tags.size > 0 ? Array.from(tags).join(",") : null;
+  };
+
   const isImportantEmail = (email: Email) => {
     const importanceValue = (email.importance || "").toLowerCase();
     if (importanceValue === "high") return true;
+    if (hasLabelTag(email, "important")) return true;
 
     const text = `${email.subject} ${email.body}`.toLowerCase();
     return ["긴급", "중요", "urgent", "important"].some((keyword) =>
@@ -166,6 +216,7 @@ export default function InboxPage() {
   };
 
   const isReplyEmail = (email: Email) => {
+    if (hasLabelTag(email, "reply")) return true;
     const text = `${email.subject} ${email.body}`.toLowerCase();
     return ["회신", "답변", "답장", "reply", "respond", "re:"].some((keyword) =>
       text.includes(keyword)
@@ -317,8 +368,8 @@ ${email.body}`;
             <Button
               variant="outline"
               size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={(event) => {
+                event.stopPropagation();
                 classifyMutation.mutate(email.id);
               }}
               disabled={classifyMutation.isPending}
@@ -337,14 +388,22 @@ ${email.body}`;
 
   return (
     <div className="flex h-screen">
-      <div className="w-64 border-r bg-muted/20">
-        <div className="p-4 border-b">
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Mail className="h-6 w-6" />
-            메일함
-          </h1>
+      <div className={`${sidebarCollapsed ? "w-16" : "w-64"} border-r bg-muted/20 transition-all`}>
+        <div className="p-3 border-b flex items-center justify-between">
+          <Mail className="h-5 w-5" />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarCollapsed((prev) => !prev)}
+          >
+            {sidebarCollapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </Button>
         </div>
-        <ScrollArea className="h-[calc(100vh-73px)]">
+        <ScrollArea className="h-[calc(100vh-124px)]">
           <div className="p-2 space-y-1">
             {categoryCount.map((category) => {
               const Icon = category.icon;
@@ -352,39 +411,35 @@ ${email.body}`;
                 <Button
                   key={category.id}
                   variant={selectedCategory === category.id ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
+                  className={`w-full justify-start gap-2 ${sidebarCollapsed ? "px-2" : ""}`}
                   onClick={() => setSelectedCategory(category.id)}
                 >
                   <Icon className="h-4 w-4" />
-                  <span className="flex-1 text-left">{category.label}</span>
-                  <Badge variant="outline" className="ml-auto">
-                    {category.count}
-                  </Badge>
+                  {!sidebarCollapsed && (
+                    <>
+                      <span className="flex-1 text-left">{category.label}</span>
+                      <Badge variant="outline" className="ml-auto">
+                        {category.count}
+                      </Badge>
+                    </>
+                  )}
                 </Button>
               );
             })}
           </div>
         </ScrollArea>
-      </div>
-
-      <div className="flex-1 flex flex-col">
-        <div className="p-4 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            {CATEGORIES.find((c) => c.id === selectedCategory)?.label}
-            <span className="text-muted-foreground ml-2">
-              ({filteredEmails.length})
-            </span>
-          </h2>
+        <div className="p-2 border-t">
           <Button
             variant="outline"
+            size="sm"
+            className="w-full"
             onClick={() => classifyAllMutation.mutate()}
             disabled={classifyAllMutation.isPending}
           >
             {classifyAllMutation.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                분류 중...
-              </>
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : sidebarCollapsed ? (
+              <Sparkles className="h-4 w-4" />
             ) : (
               <>
                 <Sparkles className="h-4 w-4 mr-2" />
@@ -393,9 +448,31 @@ ${email.body}`;
             )}
           </Button>
         </div>
+      </div>
+
+      <div className="flex-1 flex flex-col">
+        <div className="p-6 border-b flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-blue-500 text-white flex items-center justify-center text-lg">
+              📥
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">보관함</h2>
+              <p className="text-sm text-muted-foreground">
+                분류된 메일을 확인하고 분류를 수정하세요
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variant="outline" className="text-sm">
+              {CATEGORIES.find((c) => c.id === selectedCategory)?.label} ·{" "}
+              {filteredEmails.length}건
+            </Badge>
+          </div>
+        </div>
 
         <ScrollArea className="flex-1">
-          <div className="p-4 space-y-6">
+          <div className="p-6 space-y-6">
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <Card key={i}>
@@ -412,51 +489,62 @@ ${email.body}`;
               </div>
             ) : (
               <>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-muted-foreground">
-                      중요 메일
-                    </h3>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <div>
+                      <CardTitle className="text-base">중요 메일</CardTitle>
+                      <CardDescription>즉시 확인이 필요한 메일</CardDescription>
+                    </div>
                     <Badge variant="outline">{importantEmails.length}</Badge>
-                  </div>
-                  {importantEmails.length === 0 ? (
-                    <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
-                      중요 메일이 없습니다
-                    </div>
-                  ) : (
-                    <div className="space-y-2">{importantEmails.map(renderEmailCard)}</div>
-                  )}
-                </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {importantEmails.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
+                        중요 메일이 없습니다
+                      </div>
+                    ) : (
+                      importantEmails.map(renderEmailCard)
+                    )}
+                  </CardContent>
+                </Card>
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-muted-foreground">
-                      회신 메일
-                    </h3>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <div>
+                      <CardTitle className="text-base">회신 메일</CardTitle>
+                      <CardDescription>답변이 필요한 메일 모음</CardDescription>
+                    </div>
                     <Badge variant="outline">{replyEmails.length}</Badge>
-                  </div>
-                  {replyEmails.length === 0 ? (
-                    <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
-                      회신 메일이 없습니다
-                    </div>
-                  ) : (
-                    <div className="space-y-2">{replyEmails.map(renderEmailCard)}</div>
-                  )}
-                </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {replyEmails.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
+                        회신 메일이 없습니다
+                      </div>
+                    ) : (
+                      replyEmails.map(renderEmailCard)
+                    )}
+                  </CardContent>
+                </Card>
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-muted-foreground">기타</h3>
-                    <Badge variant="outline">{otherEmails.length}</Badge>
-                  </div>
-                  {otherEmails.length === 0 ? (
-                    <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
-                      기타 메일이 없습니다
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <div>
+                      <CardTitle className="text-base">기타</CardTitle>
+                      <CardDescription>중요/회신을 제외한 메일</CardDescription>
                     </div>
-                  ) : (
-                    <div className="space-y-2">{otherEmails.map(renderEmailCard)}</div>
-                  )}
-                </div>
+                    <Badge variant="outline">{otherEmails.length}</Badge>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {otherEmails.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-4 text-center border rounded-md">
+                        기타 메일이 없습니다
+                      </div>
+                    ) : (
+                      otherEmails.map(renderEmailCard)
+                    )}
+                  </CardContent>
+                </Card>
               </>
             )}
           </div>
@@ -515,6 +603,78 @@ ${email.body}`;
 
                     <div className="flex-1 overflow-y-auto border rounded-md p-4 bg-muted/50">
                       <p className="whitespace-pre-wrap text-sm">{selectedEmail.body}</p>
+                    </div>
+
+                    <div className="rounded-md border bg-muted/30 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">카테고리 수정:</span>
+                        {CATEGORIES.filter((cat) => cat.id !== "all").map((category) => (
+                          <Button
+                            key={category.id}
+                            size="sm"
+                            variant={
+                              selectedEmail.classification === category.id ? "default" : "outline"
+                            }
+                            onClick={() =>
+                              updateEmailMutation.mutate({
+                                emailId: selectedEmail.id,
+                                updates: { classification: category.id },
+                              })
+                            }
+                          >
+                            {category.label}
+                          </Button>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant={selectedEmail.classification ? "outline" : "secondary"}
+                          onClick={() =>
+                            updateEmailMutation.mutate({
+                              emailId: selectedEmail.id,
+                              updates: { classification: null },
+                            })
+                          }
+                        >
+                          분류 해제
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">중요/회신:</span>
+                        <Button
+                          size="sm"
+                          variant={selectedEmail.importance === "high" ? "default" : "outline"}
+                          onClick={() =>
+                            updateEmailMutation.mutate({
+                              emailId: selectedEmail.id,
+                              updates: {
+                                importance:
+                                  selectedEmail.importance === "high" ? null : "high",
+                              },
+                            })
+                          }
+                        >
+                          중요
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={hasLabelTag(selectedEmail, "reply") ? "default" : "outline"}
+                          onClick={() =>
+                            updateEmailMutation.mutate({
+                              emailId: selectedEmail.id,
+                              updates: {
+                                label: setLabelTag(
+                                  selectedEmail.label,
+                                  "reply",
+                                  !hasLabelTag(selectedEmail, "reply")
+                                ),
+                              },
+                            })
+                          }
+                        >
+                          회신
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="flex gap-2 pt-2 border-t">
