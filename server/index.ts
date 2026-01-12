@@ -1,45 +1,15 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes.ts";
-import { serveStatic } from "./static.ts";
+import { registerRoutes } from "./routes";
+import { serveStatic } from "./static";
 import { createServer } from "http";
-import { setStorage } from "./storage.ts";
-import { LocalSQLiteStorage } from "./local-storage.ts";
-
-// 프로세스 레벨 에러 핸들링 - 서버 크래시 방지
-process.on('uncaughtException', (error) => {
-  console.error('[CRITICAL] Uncaught Exception:', error);
-  // 서버는 계속 실행됨
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
-  // 서버는 계속 실행됨
-});
 
 const app = express();
-const httpServer = createServer(app);
 
-// 로컬 SQLite 사용
-const storage = new LocalSQLiteStorage("./data");
-setStorage(storage);
-console.log("Using local SQLite storage at: ./data");
-
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
-
+// Express 설정
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// 로그 함수
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -47,10 +17,10 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// 요청 로깅 미들웨어
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -69,7 +39,6 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       log(logLine);
     }
   });
@@ -78,32 +47,28 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  await registerRoutes(httpServer, app);
+  // Routes 등록 (여기서 내부적으로 storage를 사용합니다)
+  const httpServer = await registerRoutes(app);
 
+  // 에러 핸들링
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
-    console.error(`[ERROR] ${err.message}`, err.stack);
     res.status(status).json({ message });
+    throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
+  // 개발(Vite) vs 배포(Static) 환경 분기
+  if (app.get("env") === "development") {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
+  } else {
+    serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(port, () => {
+  // 서버 포트 설정
+  const port = 5000;
+  httpServer.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
   });
 })();
