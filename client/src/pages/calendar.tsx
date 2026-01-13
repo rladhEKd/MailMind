@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, 
   MapPin, 
@@ -11,7 +12,8 @@ import {
   Mail,
   User,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from "lucide-react";
 import {
   Dialog,
@@ -19,7 +21,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { CalendarEvent, Conversation } from "@shared/schema";
+import type { CalendarEvent } from "@shared/schema";
+import * as XLSX from "xlsx";
+import { renderAsync } from "docx-preview";
+
+type AttachmentItem = {
+  id: number;
+  filename: string;
+  originalName?: string | null;
+  size?: number;
+  mime?: string | null;
+  downloadUrl: string;
+  previewUrl: string;
+};
+
+type EmailDetail = {
+  id: number;
+  subject: string;
+  sender: string;
+  date: string;
+  body: string;
+  attachments?: AttachmentItem[];
+};
 
 function EventCard({ event, onClick }: { event: CalendarEvent; onClick: () => void }) {
   return (
@@ -63,15 +86,121 @@ function EventCard({ event, onClick }: { event: CalendarEvent; onClick: () => vo
 
 export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [previewing, setPreviewing] = useState<AttachmentItem | null>(null);
+  const [xlsxHtml, setXlsxHtml] = useState<string>("");
+  const [docxBuffer, setDocxBuffer] = useState<ArrayBuffer | null>(null);
+  const [previewError, setPreviewError] = useState<string>("");
+  const docxContainerRef = useRef<HTMLDivElement | null>(null);
+  const queryClient = useQueryClient();
+
+  const previewKind = useMemo(() => {
+    if (!previewing) return null;
+    const name = (previewing.originalName || previewing.filename || "").toLowerCase();
+    const ext = name.split(".").pop() || "";
+    const mime = (previewing.mime || "").toLowerCase();
+
+    if (mime.includes("pdf") || ext === "pdf") return "pdf";
+    if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
+    if (mime.includes("spreadsheet") || ["xlsx", "xls"].includes(ext)) return "xlsx";
+    if (mime.includes("word") || ext === "docx") return "docx";
+    if (mime.startsWith("text/") || ["txt", "csv"].includes(ext)) return "text";
+    return "other";
+  }, [previewing]);
+
+  // DOCX 렌더
+  useEffect(() => {
+    (async () => {
+      if (!previewing) return;
+      if (previewKind !== "docx") return;
+      if (!docxBuffer) return;
+      if (!docxContainerRef.current) return;
+
+      try {
+        docxContainerRef.current.innerHTML = "";
+        await renderAsync(docxBuffer, docxContainerRef.current, undefined, {
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          renderHeaders: true,
+        });
+      } catch (e: any) {
+        setPreviewError(e?.message ?? "DOCX 미리보기 중 오류가 발생했습니다.");
+      }
+    })();
+  }, [previewKind, docxBuffer, previewing]);
+
+  const openPreview = async (a: AttachmentItem) => {
+    setPreviewError("");
+    setXlsxHtml("");
+    setDocxBuffer(null);
+    setPreviewing(a);
+
+    // XLSX는 HTML로 변환
+    try {
+      const kindName = (a.originalName || a.filename || "").toLowerCase();
+      const ext = kindName.split(".").pop() || "";
+      const mime2 = (a.mime || "").toLowerCase();
+      const isXlsx = mime2.includes("spreadsheet") || ["xlsx", "xls"].includes(ext);
+      const isDocx = mime2.includes("word") || ext === "docx";
+
+      if (isXlsx) {
+        const res = await fetch(a.previewUrl);
+        if (!res.ok) throw new Error("XLSX 파일을 불러오지 못했습니다.");
+        const buf = await res.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const first = wb.SheetNames[0];
+        const ws = wb.Sheets[first];
+        const html = XLSX.utils.sheet_to_html(ws, { id: "sheet-preview" });
+        setXlsxHtml(html);
+      }
+
+      if (isDocx) {
+        const res = await fetch(a.previewUrl);
+        if (!res.ok) throw new Error("DOCX 파일을 불러오지 못했습니다.");
+        const buf = await res.arrayBuffer();
+        setDocxBuffer(buf);
+      }
+    } catch (e: any) {
+      setPreviewError(e?.message ?? "미리보기 준비 중 오류가 발생했습니다.");
+    }
+  };
   
   const { data: events, isLoading } = useQuery<CalendarEvent[]>({
     queryKey: ["/api/events"],
   });
 
-  const { data: email, isLoading: isEmailLoading } = useQuery<Conversation>({
+  const { data: email, isLoading: isEmailLoading } = useQuery<EmailDetail>({
     queryKey: ["/api/conversations", selectedEvent?.emailId],
     enabled: !!selectedEvent?.emailId,
   });
+
+  const handleResetEvents = async () => {
+    const ok = window.confirm(
+      "정말로 '일정'을 모두 초기화할까요?\n이 작업은 되돌릴 수 없습니다."
+    );
+    if (!ok) return;
+
+    setResetting(true);
+    try {
+      const res = await fetch("/api/events/reset", { method: "POST" });
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        alert("초기화 실패: " + (data?.error ?? "unknown error"));
+        return;
+      }
+
+      setSelectedEvent(null);
+      await queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+
+      alert("일정이 초기화되었습니다.");
+    } catch (e: any) {
+      alert("초기화 실패: " + (e?.message ?? "network error"));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -87,12 +216,36 @@ export default function CalendarPage() {
                 <p className="text-xs text-muted-foreground">이메일에서 추출된 일정 목록</p>
               </div>
             </div>
-            {events && (
-              <Badge variant="outline" className="gap-1">
-                <CalendarIcon className="h-3 w-3" />
-                {events.length}개 일정
-              </Badge>
-            )}
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetEvents}
+                disabled={resetting || isLoading || (events?.length ?? 0) === 0}
+                className="gap-1"
+                title="일정 테이블의 모든 데이터를 삭제합니다"
+              >
+                {resetting ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    초기화 중...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3 w-3" />
+                    일정 초기화
+                  </>
+                )}
+              </Button>
+
+              {events && (
+                <Badge variant="outline" className="gap-1">
+                  <CalendarIcon className="h-3 w-3" />
+                  {events.length}개 일정
+                </Badge>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -206,6 +359,40 @@ export default function CalendarPage() {
                             <p className="text-sm whitespace-pre-wrap">{email.body}</p>
                           </div>
                         </div>
+
+                        {Array.isArray(email.attachments) && email.attachments.length > 0 && (
+                          <div>
+                            <span className="text-sm font-medium">첨부파일:</span>
+                            <div className="mt-2 space-y-2">
+                              {email.attachments.map((a) => (
+                                <div
+                                  key={a.id}
+                                  className="flex items-center justify-between gap-3 p-3 rounded-md border bg-background"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">
+                                      {a.originalName || a.filename}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {a.mime || ""}
+                                      {typeof a.size === "number" ? ` · ${Math.round(a.size / 1024)} KB` : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button size="sm" variant="secondary" onClick={() => openPreview(a)}>
+                                      보기
+                                    </Button>
+                                    <Button asChild size="sm" variant="outline">
+                                      <a href={a.downloadUrl} target="_blank" rel="noreferrer">
+                                        다운로드
+                                      </a>
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -219,6 +406,64 @@ export default function CalendarPage() {
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 첨부파일 미리보기 */}
+        <Dialog open={!!previewing} onOpenChange={(open) => !open && setPreviewing(null)}>
+          <DialogContent className="max-w-6xl h-[90vh] flex flex-col">
+            <DialogHeader className="flex-shrink-0">
+              <DialogTitle>{previewing ? (previewing.originalName || previewing.filename) : "첨부파일"}</DialogTitle>
+            </DialogHeader>
+
+            <div className="flex items-center justify-between gap-2 pb-2">
+              <div className="text-xs text-muted-foreground truncate">
+                {previewing?.mime || ""}
+                {typeof previewing?.size === "number" ? ` · ${Math.round((previewing.size || 0) / 1024)} KB` : ""}
+              </div>
+              <div className="flex items-center gap-2">
+                {previewing && (
+                  <Button asChild size="sm" variant="outline">
+                    <a href={previewing.downloadUrl} target="_blank" rel="noreferrer">
+                      다운로드
+                    </a>
+                  </Button>
+                )}
+                {previewing && (
+                  <Button asChild size="sm" variant="secondary">
+                    <a href={previewing.previewUrl} target="_blank" rel="noreferrer">
+                      새 탭에서 열기
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {previewError && (
+              <div className="text-sm text-destructive border rounded-md p-3">
+                {previewError}
+              </div>
+            )}
+
+            <div className="flex-1 min-h-0 overflow-auto rounded-md border bg-background">
+              {!previewing ? null : previewKind === "image" ? (
+                <div className="p-3 flex justify-center">
+                  <img src={previewing.previewUrl} className="max-h-[75vh] max-w-full object-contain" />
+                </div>
+              ) : previewKind === "xlsx" ? (
+                <div className="p-3 overflow-auto" dangerouslySetInnerHTML={{ __html: xlsxHtml || "" }} />
+              ) : previewKind === "docx" ? (
+                <div className="p-3">
+                  <div ref={docxContainerRef} />
+                </div>
+              ) : (
+                <iframe
+                  title="attachment-preview"
+                  src={previewing.previewUrl}
+                  className="w-full h-full"
+                />
               )}
             </div>
           </DialogContent>

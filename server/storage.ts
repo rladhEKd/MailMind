@@ -56,9 +56,38 @@ export interface IStorage {
   addCalendarEvent(event: InsertCalendarEvent): Promise<CalendarEvent>;
   getCalendarEvents(): Promise<CalendarEvent[]>;
   getCalendarEventsByEmailId(emailId: number): Promise<CalendarEvent[]>;
+
+  // ✅ 추가: 일정 테이블 초기화
+  clearCalendarEvents(): Promise<number>;
   
   getAppSetting(key: string): Promise<string | null>;
   setAppSetting(key: string, value: string): Promise<void>;
+
+  // ----------------------
+  // Attachments (Local only for now)
+  // ----------------------
+  addEmailAttachments(emailId: number, attachments: InsertEmailAttachment[]): Promise<number>;
+  getEmailAttachments(emailId: number): Promise<EmailAttachment[]>;
+  getEmailAttachmentById(id: number): Promise<EmailAttachment | undefined>;
+}
+
+export interface InsertEmailAttachment {
+  filename: string; // 저장된 파일명
+  relPath: string;  // attachments 루트 기준 상대경로
+  size: number;
+  mime?: string | null;
+  originalName?: string | null;
+}
+
+export interface EmailAttachment {
+  id: number;
+  emailId: number;
+  filename: string;
+  relPath: string;
+  size: number;
+  mime: string | null;
+  originalName: string | null;
+  createdAt: string;
 }
 
 function tokenize(query: string): string[] {
@@ -237,6 +266,12 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(calendarEvents.createdAt));
   }
 
+  // ✅ 추가: 일정 전체 삭제
+  async clearCalendarEvents(): Promise<number> {
+    const result: any = await db.delete(calendarEvents);
+    return typeof result?.rowCount === "number" ? result.rowCount : 0;
+  }
+
   async insertEmailsAndGetIds(emailsToInsert: InsertEmail[]): Promise<Email[]> {
     if (emailsToInsert.length === 0) return [];
     
@@ -290,6 +325,21 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(appSettings).values({ key, value });
     }
+  }
+
+  // ----------------------
+  // Attachments (PostgreSQL mode: not implemented in this repo)
+  // ----------------------
+  async addEmailAttachments(_emailId: number, _attachments: InsertEmailAttachment[]): Promise<number> {
+    return 0;
+  }
+
+  async getEmailAttachments(_emailId: number): Promise<EmailAttachment[]> {
+    return [];
+  }
+
+  async getEmailAttachmentById(_id: number): Promise<EmailAttachment | undefined> {
+    return undefined;
   }
 }
 
